@@ -20,5 +20,5 @@ void test_validate_my_username()
      */
     const char *hardcoded_user = my_username();
     char *file_user = malloc_username_from_conf_file();
-    TEST_ASSERT_TRUE_MESSAGE((*(hardcoded_user) == *(file_user)),"Usernames are equal");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(hardcoded_user, file_user, "User name equal");
 }
