@@ -54,7 +54,7 @@ fi
 
 for i in $( seq 1 $NUMFILES)
 do
-	make
+	#make
 	./writer "$WRITEDIR/${username}$i.txt" "$WRITESTR"
 done
 
