@@ -73,7 +73,6 @@ bool do_exec(int count, ...)
 			int error = execv(command[0], command);
 			if(error == -1)
 			{
-				printf("Hay un error ------------------------ \n");
 				system_return = false;
 				perror("execv");
 				exit(1);
