@@ -22,7 +22,7 @@ else
 fi
 
 mkdir -p ${OUTDIR}
-
+export PATH=$PATH:/home/arm-cross-compiler/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu/bin
 cd "$OUTDIR"
 if [ ! -d "${OUTDIR}/linux-stable" ]; then
     #Clone only if the repository does not exist.
