@@ -1,3 +1,5 @@
+#!/bin/sh
+
 filesdir="$1"
 searchstr="$2"
 # Check if the number of arguments is less than 2
