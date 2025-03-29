@@ -14,15 +14,25 @@ void* threadfunc(void* thread_param)
     // TODO: wait, obtain mutex, wait, release mutex as described by thread_data structure
     // hint: use a cast like the one below to obtain thread arguments from your parameter
     struct thread_data* thread_func_args = (struct thread_data *) thread_param;
-	thread_func_args->thread_complete_success = false;
-	sleep(thread_func_args->wait_to_obtain_ms);
-	pthread_mutex_lock(thread_func_args->mutex);
-	sleep(thread_func_args->wait_to_release_ms);
-	printf("Thread %d: %s\n", thread_func_args->wait_to_obtain_ms, thread_func_args->wait_to_release_ms);
-	pthread_mutex_unlock(thread_func_args->mutex);
 	thread_func_args->thread_complete_success = true;
-	free(thread_func_args);
-    return thread_func_args;
+	usleep((thread_func_args->wait_to_obtain_ms)*1000);
+	
+	int rc = pthread_mutex_lock(thread_func_args->mutex);
+	if(rc != 0)
+	{
+		thread_func_args->thread_complete_success = false;
+	}
+	
+	usleep((thread_func_args->wait_to_release_ms)*1000);
+	
+	rc = pthread_mutex_unlock(thread_func_args->mutex);
+	if(rc != 0)
+	{
+		thread_func_args->thread_complete_success = false;
+	}
+	 
+	//free(thread_func_args);
+    return thread_param;
 }
 
 
@@ -37,48 +47,27 @@ bool start_thread_obtaining_mutex(pthread_t *thread, pthread_mutex_t *mutex,int 
      * See implementation details in threading.h file comment block
      */
 	bool success = true;
-	thread_data *ptr_thread;
-	ptr_thread = malloc(sizeof(thread_data));
-	pthread_t thread_1;
+	struct thread_data *ptr_thread;
+	ptr_thread = malloc(sizeof(struct thread_data));
+
+	ptr_thread->wait_to_obtain_ms = wait_to_obtain_ms;
+	ptr_thread->wait_to_release_ms = wait_to_release_ms;
+	ptr_thread->mutex = mutex;
 	
-	
-    if (pthread_mutex_init(&mutex, NULL) != 0) {
-        perror("Mutex initialization failed");
-        success = false;
-    }
-    
-    // Access shared resource here
-	int rc = pthread_mutex_lock(&mutex);
-	if(rc != 0)
+	if ((pthread_create(thread, NULL, threadfunc, (void *)ptr_thread)) != 0)
 	{
-		printf("Mutex lockout failed ---------> \n");
+		success = false;
+		free(ptr_thread);
+	}
+	if((ptr_thread == NULL) && (ptr_thread->thread_complete_success == false))
+	{
 		success = false;
 	}
 	else
 	{
-		ptr_thread->wait_to_obtain_ms = wait_to_obtain_ms;
-		ptr_thread->wait_to_release_ms = wait_to_release_ms;
-		ptr_thread->mutex = mutex;
+	
 	}
-
-	rc = pthread_mutex_unlock(&mutex);
-	if(rc != 0)
-	{
-		printf("Mutex lockout failed ---------> \n");
-		success = false;
-	}
-	if(success)
-	{
-		if ((pthread_create(&thread_1, NULL, threadfunc, (void *)thread_data)) != 0)
-		{
-			success = false;
-		}
-		else
-		{
-			thread = &thread_1;
-		}
-	}
-    //ptr_thread->thread_complete_success = success;
+	//free(ptr_thread);
     return success;
 }
 
