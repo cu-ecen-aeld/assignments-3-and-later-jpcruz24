@@ -11,7 +11,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#define MAXDATASIZE 1024 // max number of bytes we can get at once 
+#define MAXDATASIZE 20000 // max number of bytes we can get at once 
 #define BACKLOG 10  
 
 int socket_fd = 0;
@@ -35,6 +35,7 @@ int main(void) {
 	int status = 0;
 	struct addrinfo hints, *servinfo/*, *p*/;
 	int socket_bind = 0;
+	int fd;
 	//int yes = 1;
 	int recv_data = 0;
     char data_rcv[MAXDATASIZE]={0};
@@ -143,38 +144,38 @@ int main(void) {
 		{
 			memcpy(data_tx, data_rcv, recv_data);
 			printf("\n ------> TX DAta %s", data_tx);
-			int send_stat = send(new_fd, data_tx, recv_data,0);
-			if(send_stat == -1)
-			{
-				syslog(LOG_ERR, "Socket Fail to transmit data: ");
-				exit(-1);
-			}
-			int fd = open(outputfile , O_RDWR|O_CREAT|O_APPEND, 0644 );
+			fd = open(outputfile , O_RDWR | O_CREAT | O_APPEND, 0644 );
 			if (fd == -1)
 			{
-				perror("open");
-				exit(1);
+				syslog(LOG_ERR, "Socket Fail to receive data: ");
+				close(new_fd);
+				continue; 
 			}
 			else
 			{
 				printf("\n # Bytes to write: %d", recv_data);
 				for(int data_index = 0; data_index < recv_data; data_index ++)
 				{
-					int write_stat = write(fd, &data_rcv[data_index], 1);
-					
-					if(write_stat == -1)
-					{
-						syslog(LOG_ERR, "Writing process fail: ");
-						close(fd);
-					}
-					else
+					write(fd, &data_rcv[data_index], 1);
+//					
+//					if(write_stat == -1)
+//					{
+//						syslog(LOG_ERR, "Writing process fail: ");
+//						close(fd);
+//					}
+					//else
 					{
 						
 						if(data_rcv[data_index] == 10)
 						{
-							printf("\n Close File %s", &data_rcv[data_index]);
-							close(fd);
-							break;
+							lseek(fd, 0, SEEK_SET);
+							char read_buf[MAXDATASIZE];
+							ssize_t bytes_read;
+							while ((bytes_read = read(fd, read_buf, MAXDATASIZE)) > 0) {
+								send(new_fd, read_buf, bytes_read, 0);
+							}
+							lseek(fd, 0, SEEK_END);
+							
 						}
 					}
 					//
@@ -182,8 +183,7 @@ int main(void) {
 			}
 
 		}
-
-		close(socket_fd);
+		close(fd);
 		close(new_fd);
 		syslog(LOG_INFO, "Closed connection from %s", ip_str);
 		
