@@ -3,10 +3,10 @@
 #include <sys/stat.h>
 #include <arpa/inet.h>
 #include <syslog.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
 #include <netdb.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -17,9 +17,47 @@
 int socket_fd = 0;
 
 /*Server socket application*/
-int main(void);
+int main(int arg, char *arg2[]);
 
+void daemonize() {
+    pid_t pid;
+    pid = fork();
 
+    if (pid < 0) {
+        perror("fork");
+        exit(EXIT_FAILURE);
+    }
+
+    if (pid > 0) {
+        exit(EXIT_SUCCESS);
+    }
+
+    if (setsid() < 0) {
+        perror("setsid");
+        exit(EXIT_FAILURE);
+    }
+
+    signal(SIGHUP, SIG_IGN);
+    pid = fork();
+
+    if (pid < 0) {
+        perror("fork");
+        exit(EXIT_FAILURE);
+    }
+
+    if (pid > 0) {
+        exit(EXIT_SUCCESS);
+    }
+
+    umask(0);
+    if (chdir("/") < 0) {
+        perror("chdir");
+        exit(EXIT_FAILURE);
+    }
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+}
 
 void handle_sigint(int sig) {
 	if (sig == SIGINT) 
@@ -28,16 +66,24 @@ void handle_sigint(int sig) {
 		close(socket_fd);
 		exit(-1);
 	}
+	else if(sig == SIGHUP)
+	{
+		syslog(LOG_INFO, "Daemon reloaded configuration");
+	}
+	else
+	{
+	
+	}
 }
 
 
-int main(void) {
-	int status = 0;
-	struct addrinfo hints, *servinfo/*, *p*/;
-	int socket_bind = 0;
-	int fd;
+int main(int arg, char *arg2[]) {
+    int status = 0;
+    struct addrinfo hints, *servinfo/*, *p*/;
+    int socket_bind = 0;
+    int fd;
 	//int yes = 1;
-	int recv_data = 0;
+    int recv_data = 0;
     char data_rcv[MAXDATASIZE]={0};
     char data_tx[MAXDATASIZE]={0};
     char *outputfile = "/var/tmp/aesdsocketdata";
@@ -51,8 +97,15 @@ int main(void) {
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_PASSIVE;
 
+	if(arg == 1)
+	{
+		if(strcmp(arg_rc, arg2[0]) == 0)
+		{
+			daemonize();	
+		}
+	}
 	
-	if (signal(SIGINT, handle_sigint) == SIG_ERR) {
+	if ((signal(SIGINT, handle_sigint) == SIG_ERR) && (signal(SIGHUP, handle_sigint) == SIG_ERR)) {
 		perror("SIGINT Register error");
 		return 1;
 	}
@@ -61,9 +114,6 @@ int main(void) {
 		syslog(LOG_ERR, "Socket Error getting info");
 		exit(-1);
 	}
-	
-	
-	
 	
 	socket_fd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
 	if (socket_fd == -1) 
@@ -79,41 +129,14 @@ int main(void) {
 		syslog(LOG_ERR, "Socket bind Error ");
 		exit(-1);
 	}
-
-	
-//	for (p = servinfo; p != NULL; p = p->ai_next) {
-//		if ((socket_fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-//			close(socket_fd);
-//			syslog(LOG_ERR, "Socket Creation Error ");
-//			continue;
-//		}
-//
-//		if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-//			perror("setsockopt");
-//			exit(1);
-//		}
-//
-//		if (bind(socket_fd, p->ai_addr, p->ai_addrlen) == -1) {
-//			close(socket_fd);
-//			syslog(LOG_ERR, "Socket bind Error ");
-//			continue;
-//		}
-//		printf("server: bind...\n");
-//		break;
-//	}
-
 	
 	freeaddrinfo(servinfo);
-	
-	
-	
 	if(listen(socket_fd, 5)< 0)
 	{
 		close(socket_fd);
 		syslog(LOG_ERR, "Socket listen Error ");
 		exit(-1);
 	}
-	
 	printf("server: waiting for connections...\n");
 	while(1)
 	{
@@ -157,15 +180,14 @@ int main(void) {
 				for(int data_index = 0; data_index < recv_data; data_index ++)
 				{
 					write(fd, &data_rcv[data_index], 1);
-//					
-//					if(write_stat == -1)
-//					{
-//						syslog(LOG_ERR, "Writing process fail: ");
-//						close(fd);
-//					}
-					//else
+					
+					if(write_stat == -1)
 					{
-						
+						syslog(LOG_ERR, "Writing process fail: ");
+						close(fd);
+					}
+					else
+					{
 						if(data_rcv[data_index] == 10)
 						{
 							lseek(fd, 0, SEEK_SET);
@@ -178,7 +200,6 @@ int main(void) {
 							
 						}
 					}
-					//
 				}
 			}
 
@@ -186,7 +207,6 @@ int main(void) {
 		close(fd);
 		close(new_fd);
 		syslog(LOG_INFO, "Closed connection from %s", ip_str);
-		
 	}
 	return 0;
 }
