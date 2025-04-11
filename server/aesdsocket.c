@@ -10,126 +10,95 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <stdbool.h>
 
-#define MAXDATASIZE 20000 // max number of bytes we can get at once 
+#define MAXDATASIZE 128 // max number of bytes we can get at once 
 #define BACKLOG 10  
 
 int socket_fd = 0;
+volatile sig_atomic_t terminate_flag = false;
 
 /*Server socket application*/
 int main(int arg, char *arg2[]);
 
 void daemonize() {
-    pid_t pid;
-    pid = fork();
+	int pid = fork();
 
-    if (pid < 0) {
-        perror("fork");
-        exit(EXIT_FAILURE);
-    }
-
-    if (pid > 0) {
-        exit(EXIT_SUCCESS);
-    }
-
-    if (setsid() < 0) {
-        perror("setsid");
-        exit(EXIT_FAILURE);
-    }
-
-    signal(SIGHUP, SIG_IGN);
-    pid = fork();
-
-    if (pid < 0) {
-        perror("fork");
-        exit(EXIT_FAILURE);
-    }
-
-    if (pid > 0) {
-        exit(EXIT_SUCCESS);
-    }
-
-    umask(0);
-    if (chdir("/") < 0) {
-        perror("chdir");
-        exit(EXIT_FAILURE);
-    }
-    close(STDIN_FILENO);
-    close(STDOUT_FILENO);
-    close(STDERR_FILENO);
+	if (pid < 0) {
+		perror("fork failed\n");
+		exit(EXIT_FAILURE);
+	}
+	else if (pid == 0) {
+		printf("---- daemon process\n");
+		setsid();
+	}
+	else {
+		exit(0);
+	}
 }
 
-void handle_sigint(int sig) {
-	if (sig == SIGINT) 
+void signal_handler(int sig) {
+	if ((sig == SIGINT) || (sig == SIGTERM)) 
 	{
-		printf("------------------>Interrupt signal received. Closing socket and exiting...\n");
-		close(socket_fd);
-		exit(-1);
-	}
-	else if(sig == SIGHUP)
-	{
-		syslog(LOG_INFO, "Daemon reloaded configuration");
-	}
-	else
-	{
-	
+		unlink("/var/tmp/aesdsocketdata");
+		terminate_flag = true; 
+		//exit(-1);
 	}
 }
 
 
 int main(int arg, char *arg2[]) {
-    int status = 0;
-    struct addrinfo hints, *servinfo/*, *p*/;
-    int socket_bind = 0;
-    int fd;
-	//int yes = 1;
-    int recv_data = 0;
-    char data_rcv[MAXDATASIZE]={0};
-    char data_tx[MAXDATASIZE]={0};
-    char *outputfile = "/var/tmp/aesdsocketdata";
-    char ip_str[INET_ADDRSTRLEN];
-    struct sockaddr_storage their_addr;
-    //struct sockaddr_in client_addr;
-    socklen_t addr_size;
-    
+	int status = 0;
+	struct addrinfo hints, *servinfo, *p;
+	//nt socket_bind = 0;
+	int new_fd = 0;
+	int fd;
+	int yes = 1;
+	int recv_data = 0;
+	char data_rx[MAXDATASIZE]={0};
+	char *outputfile = "/var/tmp/aesdsocketdata";
+	char *arg_rc = "-d";
+	char ip_str[INET_ADDRSTRLEN];
+	struct sockaddr_storage their_addr;
+	struct sigaction sa;
+
+	socklen_t addr_size;
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = PF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_PASSIVE;
 
-	if(arg == 1)
-	{
-		if(strcmp(arg_rc, arg2[0]) == 0)
-		{
-			daemonize();	
-		}
-	}
-	
-	if ((signal(SIGINT, handle_sigint) == SIG_ERR) && (signal(SIGHUP, handle_sigint) == SIG_ERR)) {
-		perror("SIGINT Register error");
-		return 1;
-	}
-	
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = signal_handler;
+	sigaction(SIGINT, &sa, NULL);
+	sigaction(SIGTERM, &sa, NULL);
+
 	if ((status = getaddrinfo(NULL, "9000", &hints, &servinfo)) != 0) {
 		syslog(LOG_ERR, "Socket Error getting info");
 		exit(-1);
 	}
-	
-	socket_fd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
-	if (socket_fd == -1) 
-	{
-		close(socket_fd);
-		syslog(LOG_ERR, "Socket Creation Error ");
-		exit(-1);
+
+	for (p = servinfo; p != NULL; p = p->ai_next) {
+		if ((socket_fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+			close(socket_fd);
+			syslog(LOG_ERR, "Socket Creation Error ");
+			continue;
+		}
+
+		if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+			perror("setsockopt");
+			exit(1);
+		}
+
+		if (bind(socket_fd, p->ai_addr, p->ai_addrlen) == -1) {
+			close(socket_fd);
+			syslog(LOG_ERR, "Socket bind Error ");
+			continue;
+		}
+		break;
 	}
 
-	socket_bind = bind(socket_fd, servinfo->ai_addr, servinfo->ai_addrlen);
-	if (socket_bind == -1) {
-		close(socket_fd);
-		syslog(LOG_ERR, "Socket bind Error ");
-		exit(-1);
-	}
-	
+
 	freeaddrinfo(servinfo);
 	if(listen(socket_fd, 5)< 0)
 	{
@@ -137,76 +106,65 @@ int main(int arg, char *arg2[]) {
 		syslog(LOG_ERR, "Socket listen Error ");
 		exit(-1);
 	}
+	if(arg == 2)
+	{
+		if(strcmp(arg_rc, arg2[1]) == 0)
+		{
+			daemonize();	
+		}
+	}
 	printf("server: waiting for connections...\n");
-	while(1)
+	while(!terminate_flag)
 	{
 		addr_size = sizeof their_addr;
-		int new_fd = accept(socket_fd, (struct sockaddr *)&their_addr, &addr_size);
+		new_fd = accept(socket_fd, (struct sockaddr *)&their_addr, &addr_size);
 
 		if (new_fd == -1) {
 			close(new_fd);
 			syslog(LOG_ERR, "Socket Fail to accept connection ");
 			exit(-1);
 		}
-		else
-		{
-			inet_ntop(AF_INET, &(their_addr), ip_str, INET_ADDRSTRLEN);
-			syslog(LOG_INFO, "Accepted connection from %s", ip_str);
-			printf("Accepted connection from %s", ip_str);
-		}
+		inet_ntop(AF_INET, &(their_addr), ip_str, INET_ADDRSTRLEN);
+		syslog(LOG_INFO, "Accepted connection from %s", ip_str);
+		printf("Accepted connection from %s", ip_str);
 
 
-		recv_data = recv(new_fd, data_rcv, MAXDATASIZE-1, 0);
-		printf("\n Received DAta %s", data_rcv);
-		if(recv_data == -1)
+		fd = open(outputfile , O_RDWR | O_CREAT | O_APPEND, 0644 );
+		if (fd == -1)
 		{
 			syslog(LOG_ERR, "Socket Fail to receive data: ");
-			exit(-1);
+			close(new_fd);
 		}
-		else
+		while ((recv_data = recv(new_fd, data_rx, sizeof(data_rx), 0)) > 0 )
 		{
-			memcpy(data_tx, data_rcv, recv_data);
-			printf("\n ------> TX DAta %s", data_tx);
-			fd = open(outputfile , O_RDWR | O_CREAT | O_APPEND, 0644 );
-			if (fd == -1)
+
+			//printf("\n-----------> # Bytes to write: %d \n", recv_data);
+
+			int write_stat = write(fd, data_rx, recv_data);
+
+			if(write_stat == -1)
 			{
-				syslog(LOG_ERR, "Socket Fail to receive data: ");
-				close(new_fd);
-				continue; 
+				syslog(LOG_ERR, "Writing process fail: ");
+				close(fd);
 			}
 			else
 			{
-				printf("\n # Bytes to write: %d", recv_data);
-				for(int data_index = 0; data_index < recv_data; data_index ++)
+				if(memchr(data_rx, '\n', recv_data) != NULL)
 				{
-					write(fd, &data_rcv[data_index], 1);
-					
-					if(write_stat == -1)
-					{
-						syslog(LOG_ERR, "Writing process fail: ");
-						close(fd);
-					}
-					else
-					{
-						if(data_rcv[data_index] == 10)
-						{
-							lseek(fd, 0, SEEK_SET);
-							char read_buf[MAXDATASIZE];
-							ssize_t bytes_read;
-							while ((bytes_read = read(fd, read_buf, MAXDATASIZE)) > 0) {
-								send(new_fd, read_buf, bytes_read, 0);
-							}
-							lseek(fd, 0, SEEK_END);
-							
-						}
+					lseek(fd, 0, SEEK_SET);
+					while ((recv_data = read(fd, data_rx, sizeof(data_rx))) > 0) {
+						send(new_fd, data_rx, recv_data, 0);
 					}
 				}
 			}
-
 		}
 		close(fd);
 		close(new_fd);
 		syslog(LOG_INFO, "Closed connection from %s", ip_str);
 	}
+	close(socket_fd);
+
+
+	syslog(LOG_INFO, "Caught signal, exiting");
 	return 0;
 }
