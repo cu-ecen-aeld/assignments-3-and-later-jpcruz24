@@ -1,3 +1,5 @@
+#!/bin/sh
+
 CC = $(CROSS_COMPILE)gcc
 
 # Compiler flags
